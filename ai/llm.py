@@ -1,18 +1,25 @@
-from transformers import pipeline
+"""Local text generation via a seq2seq model (flan-t5). Loaded lazily on first
+use. flan-t5 is a text2text-generation model, not text-generation."""
 
-generator = pipeline(
-    "text-generation",
-    model="google/flan-t5-base"
-)
+_generator = None
 
 
-def generate(prompt, max_length=256):
+def _get_generator():
+    global _generator
+    if _generator is None:
+        from transformers import pipeline
+        _generator = pipeline(
+            "text2text-generation",
+            model="google/flan-t5-base",
+        )
+    return _generator
 
-    result = generator(
+
+def generate(prompt, max_new_tokens=256):
+    result = _get_generator()(
         prompt,
-        max_new_tokens=max_length,
+        max_new_tokens=max_new_tokens,
         do_sample=True,
-        temperature=0.7
+        temperature=0.7,
     )
-
     return result[0]["generated_text"]

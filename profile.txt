@@ -1,0 +1,8 @@
+Software engineer with experience in Python, backend systems, REST/GraphQL APIs,
+distributed systems and cloud infrastructure (AWS/GCP). Comfortable with async
+programming, data pipelines, Docker and CI/CD. Enjoy building internal tooling
+and automation. Looking for backend / platform / infrastructure engineering roles.
+
+# NOTE: This whole file is used as your "profile" for AI scoring and document
+# generation. Replace the text above with your real background before running
+# with --ai or --generate. (This file is only read when AI is enabled.)

@@ -1,0 +1,8 @@
+# One company name per line.
+# Blank lines and lines starting with '#' are ignored.
+J P Morgan
+CoinSwitch
+Binance
+Stripe
+Zomato
+Razorpay

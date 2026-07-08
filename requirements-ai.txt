@@ -1,0 +1,6 @@
+# Optional AI enrichment dependencies (only needed for --ai / --generate).
+# Install with: pip install -r requirements-ai.txt
+transformers>=4.44.0
+torch>=2.2.0
+sentence-transformers>=3.0.0
+huggingface_hub>=0.24.0

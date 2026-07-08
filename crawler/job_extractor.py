@@ -1,7 +1,9 @@
+"""Fetch structured job listings from detected ATS providers."""
 import requests
-import json
-from ai.hf_client import classify_job
-from ai.scoring import score_job
+from urllib.parse import urljoin
+
+from bs4 import BeautifulSoup
+
 
 # ---------------------------
 # GREENHOUSE
@@ -13,13 +15,7 @@ def extract_greenhouse(url):
         # boards.greenhouse.io/company OR API endpoint
         if not url.endswith(".json"):
 
-            if url.endswith("/"):
-
-                url = url + "?format=json"
-
-            else:
-
-                url = url + ".json"
+            url = url + ("?format=json" if url.endswith("/") else ".json")
 
         r = requests.get(url, timeout=15)
 
@@ -33,8 +29,8 @@ def extract_greenhouse(url):
 
                 jobs.append({
                     "title": job.get("title"),
-                    "location": job.get("location", {}).get("name"),
-                    "url": job.get("absolute_url")
+                    "location": (job.get("location") or {}).get("name"),
+                    "url": job.get("absolute_url"),
                 })
 
         return jobs
@@ -53,13 +49,7 @@ def extract_lever(url):
 
         if not url.endswith("/postings"):
 
-            if url.endswith("/"):
-
-                url = url + "postings"
-
-            else:
-
-                url = url + "/postings"
+            url = url + ("postings" if url.endswith("/") else "/postings")
 
         r = requests.get(url, timeout=15)
 
@@ -71,8 +61,8 @@ def extract_lever(url):
 
             jobs.append({
                 "title": job.get("text"),
-                "location": job.get("categories", {}).get("location"),
-                "url": job.get("hostedUrl")
+                "location": (job.get("categories") or {}).get("location"),
+                "url": job.get("hostedUrl"),
             })
 
         return jobs
@@ -87,44 +77,22 @@ def extract_lever(url):
 # ---------------------------
 def extract_generic(html, base_url):
 
-    from bs4 import BeautifulSoup
-    from urllib.parse import urljoin
-
     soup = BeautifulSoup(html, "lxml")
+
+    keywords = ("engineer", "developer", "intern", "manager", "analyst")
 
     jobs = []
 
     for a in soup.find_all("a", href=True):
 
-        text = a.text.lower()
+        text = a.get_text(strip=True)
 
-        if any(k in text for k in ["engineer", "developer", "intern", "manager", "analyst"]):
+        if text and any(k in text.lower() for k in keywords):
 
             jobs.append({
-                "title": a.text.strip(),
-                "url": urljoin(base_url, a["href"])
+                "title": text,
+                "location": None,
+                "url": urljoin(base_url, a["href"]),
             })
 
     return jobs
-
-def enrich_jobs(jobs, user_profile):
-
-    enriched = []
-
-    for job in jobs:
-
-        text = job.get("title", "") + " " + job.get("description", "")
-
-        classification = classify_job(text)
-
-        relevance = score_job(text, user_profile)
-
-        job["role_type"] = classification["label"]
-
-        job["role_confidence"] = classification["score"]
-
-        job["match_score"] = relevance
-
-        enriched.append(job)
-
-    return enriched
