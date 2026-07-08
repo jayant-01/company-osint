@@ -24,13 +24,19 @@ Do not change the input format or the two-CSV output shape without the user aski
 `main.py` -> `pipeline.process_company()`:
 
 1. `crawler.search.search_company(name)` — DuckDuckGo, returns candidate URLs
-   (filtered by `crawler.constants.BLACKLIST_DOMAINS`). Takes `websites[0]`.
-2. `crawler.downloader.fetch(url)` — async aiohttp GET, SQLite-cached
-   (`crawler.cache`). Returns `{"url", "html"}` or `None`.
+   (filtered by `crawler.constants.BLACKLIST_DOMAINS`, then ranked by fuzzy
+   domain match via `crawler.search.rank_websites` + `crawler.utils.domain_core`).
+   Takes the best candidate `websites[0]`.
+2. `pipeline._crawl(website)` — analyze the homepage; if no ATS is found, follow
+   up to `MAX_CAREERS_CRAWL` (2) **same-registered-domain** careers pages and
+   `_merge_analysis` the results. Fetch is async aiohttp + SQLite cache
+   (`crawler.downloader` / `crawler.cache`).
 3. `crawler.intelligence.analyze_site(url, html)` — extracts links, ATS
    (`crawler.ats`), emails (`crawler.email`), socials (`crawler.social`),
-   careers/intern/blog links, and jobs (`crawler.ats_router` ->
-   `crawler.job_extractor` greenhouse/lever APIs). Returns a dict.
+   careers/intern/blog links, and jobs. Job listings come from the ATS
+   providers' real JSON APIs (`crawler.ats_router` -> `crawler.job_extractor`:
+   greenhouse / lever / ashby), parsing the company token from the detected link.
+   Returns a dict.
 4. `pipeline` builds a `models.company.Company` + list of `models.job.Job`.
 5. If `--ai`: `ai.pipeline.score_jobs()` fills role_type/confidence, match_score,
    company_score, final_score and sorts. If `--generate N`:

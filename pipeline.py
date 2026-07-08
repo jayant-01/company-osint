@@ -8,8 +8,12 @@ import asyncio
 from crawler.search import search_company
 from crawler.downloader import fetch
 from crawler.intelligence import analyze_site
+from crawler.utils import registered_domain
 from models.company import Company
 from models.job import Job
+
+# How many same-domain careers pages to follow when the homepage has no ATS.
+MAX_CAREERS_CRAWL = 2
 
 
 def _build_company(name, data):
@@ -52,6 +56,81 @@ def _build_jobs(name, data):
     return jobs
 
 
+async def _analyze_url(url):
+    """Fetch a URL and run the (synchronous) site analysis off the event loop."""
+    page = await fetch(url)
+    if not page:
+        return None
+    return await asyncio.to_thread(analyze_site, page["url"], page["html"])
+
+
+def _uniq(seq):
+    out, seen = [], set()
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def _merge_analysis(a, b):
+    """Merge a second page's analysis into the first (homepage wins for scalars)."""
+    merged = dict(a)
+    merged["careers_pages"] = _uniq(a["careers_pages"] + b["careers_pages"])[:5]
+    merged["internship_pages"] = _uniq(a["internship_pages"] + b["internship_pages"])[:5]
+    merged["blogs"] = _uniq(a["blogs"] + b["blogs"])[:5]
+    merged["emails"] = _uniq(a["emails"] + b["emails"])[:10]
+
+    seen, ats = set(), []
+    for x in a["ats_detected"] + b["ats_detected"]:
+        k = (x["provider"], x["url"])
+        if k not in seen:
+            seen.add(k)
+            ats.append(x)
+    merged["ats_detected"] = ats
+
+    seen, jobs = set(), []
+    for j in a["jobs_found"] + b["jobs_found"]:
+        ident = j.get("url") or j.get("title")
+        if ident not in seen:
+            seen.add(ident)
+            jobs.append(j)
+    merged["jobs_found"] = jobs[:20]
+
+    socials = dict(b.get("socials", {}))
+    socials.update(a.get("socials", {}))  # homepage socials win
+    merged["socials"] = socials
+
+    merged["total_links"] = a.get("total_links", 0) + b.get("total_links", 0)
+    return merged
+
+
+async def _crawl(website):
+    """Analyze the homepage; if no ATS is found, follow same-domain careers pages."""
+    data = await _analyze_url(website)
+    if data is None:
+        return None
+
+    if data["ats_detected"]:
+        return data
+
+    site_domain = registered_domain(data["url"])
+    candidates = [
+        c for c in data["careers_pages"]
+        if registered_domain(c) == site_domain and c != data["url"]
+    ]
+
+    for careers_url in candidates[:MAX_CAREERS_CRAWL]:
+        sub = await _analyze_url(careers_url)
+        if not sub:
+            continue
+        data = _merge_analysis(data, sub)
+        if data["ats_detected"]:
+            break
+
+    return data
+
+
 async def process_company(name, use_ai=False, profile=None, generate_top=0):
     result = {"company": Company(name=name), "jobs": [], "generated": []}
 
@@ -64,14 +143,10 @@ async def process_company(name, use_ai=False, profile=None, generate_top=0):
     website = websites[0]
     result["company"].website = website
 
-    page = await fetch(website)
-    if not page:
+    data = await _crawl(website)
+    if data is None:
         print(f"   {name}: fetch failed ({website})")
         return result
-
-    # analyze_site is synchronous (BeautifulSoup + sync ATS requests); run it
-    # off the event loop so companies still process concurrently.
-    data = await asyncio.to_thread(analyze_site, page["url"], page["html"])
 
     company = _build_company(name, data)
     jobs = _build_jobs(name, data)
