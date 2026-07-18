@@ -1,10 +1,13 @@
 # company-osint
 
 Personal OSINT tool. Reads company names from a text file, finds each company's
-website, crawls it for careers pages, ATS providers, job listings, emails and
-social links, and writes the results to CSV. Optional local AI enrichment can
-classify & score jobs against your profile and draft resume bullets / cover
-letters / outreach messages.
+website, crawls it for careers pages, ATS providers, job listings, contact
+details and social links, and writes the results to CSV. The core (no-AI) crawl
+also pulls a company description, firmographics from embedded schema.org data
+(founding year, HQ location, headcount, logo), a tech-stack fingerprint, phone
+numbers, and a per-company hiring breakdown by department. Optional local AI
+enrichment can classify & score jobs against your profile and draft resume
+bullets / cover letters / outreach messages.
 
 ## Install
 
@@ -35,8 +38,12 @@ Options:
 
 ## Output
 
-    output/companies.csv   one row per company (website, ATS, #jobs, emails, socials, ...)
-    output/jobs.csv        one row per job found (+ AI scores when --ai is used)
+    output/companies.csv   one row per company: website, description, founded,
+                           hq_location, employee_count, tech_stack, ats, num_jobs,
+                           hiring_breakdown, emails, phones, security_contact,
+                           socials, rss_feed, logo, ...
+    output/jobs.csv        one row per job: title, location, department,
+                           employment_type, remote, posted, url (+ AI scores with --ai)
     output/generated/      resume/cover/outreach markdown (only with --generate)
 
 ## Notes

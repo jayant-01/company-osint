@@ -13,6 +13,14 @@ class Job(BaseModel):
 
     description: str = ""
 
+    department: str | None = None
+
+    employment_type: str | None = None
+
+    remote: str | None = None
+
+    posted: str | None = None
+
     role_type: str | None = None
 
     role_confidence: float = 0.0

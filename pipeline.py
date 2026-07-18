@@ -4,11 +4,14 @@ Returns a plain dict per company:
     {"company": Company, "jobs": [Job, ...], "generated": [(Job, docs), ...]}
 """
 import asyncio
+from urllib.parse import urlsplit
 
 from crawler.search import search_company
 from crawler.downloader import fetch
 from crawler.intelligence import analyze_site
 from crawler.utils import registered_domain
+from crawler.roles import hiring_breakdown
+from crawler.security_txt import SECURITY_PATHS, parse_security_txt
 from models.company import Company
 from models.job import Job
 
@@ -24,10 +27,12 @@ def _build_company(name, data):
     socials = data.get("socials", {})
 
     providers = sorted({a["provider"] for a in ats_detected})
+    titles = [j.get("title") for j in data.get("jobs_found", [])]
 
     return Company(
         name=name,
         website=data.get("url"),
+        description=data.get("description") or None,
         career_page=careers[0] if careers else None,
         ats=", ".join(providers) if providers else None,
         github=socials.get("github"),
@@ -35,8 +40,17 @@ def _build_company(name, data):
         engineering_blog=blogs[0] if blogs else None,
         internships=internships[0] if internships else None,
         emails=data.get("emails", []),
+        phones=data.get("phones", []),
+        security_contact=data.get("security_contact", []),
         socials=socials,
         job_pages=careers,
+        feeds=data.get("feeds", []),
+        founded=data.get("founded"),
+        hq_location=data.get("hq_location"),
+        employee_count=data.get("employee_count"),
+        logo=data.get("logo"),
+        tech_stack=data.get("tech_stack", []),
+        hiring_breakdown=hiring_breakdown(titles) or None,
     )
 
 
@@ -52,6 +66,10 @@ def _build_jobs(name, data):
             location=j.get("location"),
             url=j.get("url"),
             description=(j.get("description") or ""),
+            department=j.get("department"),
+            employment_type=j.get("employment_type"),
+            remote=j.get("remote"),
+            posted=j.get("posted"),
         ))
     return jobs
 
@@ -62,6 +80,22 @@ async def _analyze_url(url):
     if not page:
         return None
     return await asyncio.to_thread(analyze_site, page["url"], page["html"])
+
+
+async def _fetch_security_contacts(site_url):
+    """Look up the site's security.txt (RFC 9116) and return its Contact values."""
+    parts = urlsplit(site_url or "")
+    if not parts.scheme or not parts.netloc:
+        return []
+    origin = f"{parts.scheme}://{parts.netloc}"
+    for path in SECURITY_PATHS:
+        page = await fetch(origin + path)
+        if not page:
+            continue
+        contacts = parse_security_txt(page["html"])
+        if contacts:
+            return contacts
+    return []
 
 
 def _uniq(seq):
@@ -79,7 +113,14 @@ def _merge_analysis(a, b):
     merged["careers_pages"] = _uniq(a["careers_pages"] + b["careers_pages"])[:5]
     merged["internship_pages"] = _uniq(a["internship_pages"] + b["internship_pages"])[:5]
     merged["blogs"] = _uniq(a["blogs"] + b["blogs"])[:5]
+    merged["feeds"] = _uniq(a.get("feeds", []) + b.get("feeds", []))[:5]
     merged["emails"] = _uniq(a["emails"] + b["emails"])[:10]
+    merged["phones"] = _uniq(a.get("phones", []) + b.get("phones", []))[:10]
+    merged["tech_stack"] = _uniq(a.get("tech_stack", []) + b.get("tech_stack", []))
+
+    # Homepage (a) wins for scalars; the careers page fills any gaps.
+    for key in ("description", "founded", "hq_location", "employee_count", "logo"):
+        merged[key] = a.get(key) or b.get(key)
 
     seen, ats = set(), []
     for x in a["ats_detected"] + b["ats_detected"]:
@@ -147,6 +188,8 @@ async def process_company(name, use_ai=False, profile=None, generate_top=0):
     if data is None:
         print(f"   {name}: fetch failed ({website})")
         return result
+
+    data["security_contact"] = await _fetch_security_contacts(data["url"])
 
     company = _build_company(name, data)
     jobs = _build_jobs(name, data)

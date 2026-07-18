@@ -42,19 +42,36 @@ def load_profile(path):
 
 
 COMPANY_COLUMNS = [
-    "company", "website", "careers_page", "ats", "num_jobs",
-    "emails", "github", "linkedin", "engineering_blog", "internships",
+    "company", "website", "description",
+    "founded", "hq_location", "employee_count", "tech_stack",
+    "careers_page", "ats", "num_jobs", "hiring_breakdown", "internships",
+    "emails", "phones", "security_contact", "github", "linkedin", "other_socials",
+    "engineering_blog", "rss_feed", "logo",
 ]
 
 JOB_COLUMNS = [
-    "company", "title", "location", "url",
+    "company", "title", "location", "department", "employment_type",
+    "remote", "posted", "url",
     "role_type", "role_confidence", "match_score", "company_score", "final_score",
 ]
+
+# Social platforms that already have their own dedicated column.
+_DEDICATED_SOCIALS = {"github", "linkedin"}
 
 
 def _join(values, limit=5):
     values = [v for v in (values or []) if v]
     return "; ".join(values[:limit])
+
+
+def _other_socials(socials):
+    """Join social profiles that don't have a dedicated column, as 'name=url'."""
+    items = [
+        f"{name}={url}"
+        for name, url in (socials or {}).items()
+        if name not in _DEDICATED_SOCIALS and url
+    ]
+    return "; ".join(items)
 
 
 def write_companies_csv(path, results):
@@ -67,14 +84,25 @@ def write_companies_csv(path, results):
             writer.writerow({
                 "company": c.name,
                 "website": c.website or "",
+                "description": c.description or "",
+                "founded": c.founded or "",
+                "hq_location": c.hq_location or "",
+                "employee_count": c.employee_count or "",
+                "tech_stack": _join(c.tech_stack, limit=20),
                 "careers_page": c.career_page or "",
                 "ats": c.ats or "",
                 "num_jobs": len(r["jobs"]),
+                "hiring_breakdown": c.hiring_breakdown or "",
+                "internships": "yes" if c.internships else "no",
                 "emails": _join(c.emails),
+                "phones": _join(c.phones),
+                "security_contact": _join(c.security_contact),
                 "github": c.github or "",
                 "linkedin": c.linkedin or "",
+                "other_socials": _other_socials(c.socials),
                 "engineering_blog": c.engineering_blog or "",
-                "internships": "yes" if c.internships else "no",
+                "rss_feed": _join(c.feeds),
+                "logo": c.logo or "",
             })
     return len(results)
 
@@ -91,6 +119,10 @@ def write_jobs_csv(path, results):
                     "company": job.company or r["company"].name,
                     "title": job.title,
                     "location": job.location or "",
+                    "department": job.department or "",
+                    "employment_type": job.employment_type or "",
+                    "remote": job.remote or "",
+                    "posted": job.posted or "",
                     "url": job.url or "",
                     # AI columns stay blank when scoring was not run.
                     "role_type": job.role_type or "",

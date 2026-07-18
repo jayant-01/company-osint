@@ -1,8 +1,12 @@
 """Fetch structured job listings from detected ATS providers.
 
 Each extractor receives the raw ATS link that was found on the page, parses the
-company token/slug out of it, and calls the provider's public JSON API.
+company token/slug out of it, and calls the provider's public JSON API. Beyond
+title/location/url we also pull department, employment type, a remote flag and
+the posted date — all already present in the same JSON response.
 """
+from datetime import datetime, timezone
+
 import requests
 from urllib.parse import urlparse, parse_qs, urljoin
 
@@ -14,6 +18,27 @@ TIMEOUT = 15
 def _first_path_segment(url, skip=()):
     parts = [p for p in urlparse(url).path.split("/") if p and p not in skip]
     return parts[0] if parts else None
+
+
+def _iso_date(value):
+    """Return the YYYY-MM-DD portion of an ISO-8601 timestamp, if present."""
+    if not value or not isinstance(value, str):
+        return None
+    m = value[:10]
+    return m if len(m) == 10 and m[4] == "-" and m[7] == "-" else None
+
+
+def _epoch_ms_date(value):
+    """Convert a millisecond epoch (int or numeric str) to YYYY-MM-DD."""
+    try:
+        ts = int(value) / 1000
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _remote_from_location(location):
+    return "remote" if location and "remote" in location.lower() else None
 
 
 # ---------------------------
@@ -29,6 +54,15 @@ def _greenhouse_token(url):
     )
 
 
+def _greenhouse_department(job):
+    depts = job.get("departments") or []
+    for d in depts:
+        name = (d or {}).get("name")
+        if name:
+            return name
+    return None
+
+
 def extract_greenhouse(url):
     token = _greenhouse_token(url)
     if not token:
@@ -36,14 +70,19 @@ def extract_greenhouse(url):
     api = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
     try:
         data = requests.get(api, timeout=TIMEOUT).json()
-        return [
-            {
+        jobs = []
+        for job in data.get("jobs", []):
+            location = (job.get("location") or {}).get("name")
+            jobs.append({
                 "title": job.get("title"),
-                "location": (job.get("location") or {}).get("name"),
+                "location": location,
                 "url": job.get("absolute_url"),
-            }
-            for job in data.get("jobs", [])
-        ]
+                "department": _greenhouse_department(job),
+                "employment_type": None,
+                "remote": _remote_from_location(location),
+                "posted": _iso_date(job.get("updated_at")),
+            })
+        return jobs
     except Exception:
         return []
 
@@ -63,14 +102,22 @@ def extract_lever(url):
     api = f"https://api.lever.co/v0/postings/{token}?mode=json"
     try:
         data = requests.get(api, timeout=TIMEOUT).json()
-        return [
-            {
+        jobs = []
+        for job in data:
+            cats = job.get("categories") or {}
+            location = cats.get("location")
+            workplace = job.get("workplaceType")
+            jobs.append({
                 "title": job.get("text"),
-                "location": (job.get("categories") or {}).get("location"),
+                "location": location,
                 "url": job.get("hostedUrl"),
-            }
-            for job in data
-        ]
+                "department": cats.get("team") or cats.get("department"),
+                "employment_type": cats.get("commitment"),
+                "remote": (workplace.lower() if workplace else None)
+                or _remote_from_location(location),
+                "posted": _epoch_ms_date(job.get("createdAt")),
+            })
+        return jobs
     except Exception:
         return []
 
@@ -95,14 +142,20 @@ def extract_ashby(url):
     api = f"https://api.ashbyhq.com/posting-api/job-board/{token}"
     try:
         data = requests.get(api, timeout=TIMEOUT).json()
-        return [
-            {
+        jobs = []
+        for job in data.get("jobs", []):
+            location = job.get("location")
+            remote = "remote" if job.get("isRemote") else _remote_from_location(location)
+            jobs.append({
                 "title": job.get("title"),
-                "location": job.get("location"),
+                "location": location,
                 "url": job.get("jobUrl") or job.get("applyUrl"),
-            }
-            for job in data.get("jobs", [])
-        ]
+                "department": job.get("department") or job.get("team"),
+                "employment_type": job.get("employmentType"),
+                "remote": remote,
+                "posted": _iso_date(job.get("publishedAt")),
+            })
+        return jobs
     except Exception:
         return []
 
@@ -121,5 +174,9 @@ def extract_generic(html, base_url):
                 "title": text,
                 "location": None,
                 "url": urljoin(base_url, a["href"]),
+                "department": None,
+                "employment_type": None,
+                "remote": None,
+                "posted": None,
             })
     return jobs
